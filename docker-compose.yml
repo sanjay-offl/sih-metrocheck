@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-metrocheck}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metrocheck123}
+      POSTGRES_DB: ${POSTGRES_DB:-metrocheck_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-metrocheck} -d ${POSTGRES_DB:-metrocheck_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-metrocheck}:${POSTGRES_PASSWORD:-metrocheck123}@postgres:5432/${POSTGRES_DB:-metrocheck_db}
+      REDIS_URL: redis://redis:6379/0
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      SECRET_KEY: ${SECRET_KEY:-change_me_to_a_long_random_string}
+      CORS_ORIGINS: http://localhost:3000
+      DEBUG: "false"
+      RUN_MIGRATIONS: "true"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/generated_reports:/app/generated_reports
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      # Browsers run on the host, so the public URL must be host-reachable.
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+
+volumes:
+  postgres_data:
